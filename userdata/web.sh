@@ -82,8 +82,13 @@ cat > /usr/share/nginx/html/index.html << 'HTMLEOF'
 </html>
 HTMLEOF
 
-# ─── Configure Nginx reverse proxy ───
+# ─── Configure Nginx reverse proxy with upstream load balancing ───
 cat > /etc/nginx/conf.d/reverse-proxy.conf << 'NGINXEOF'
+upstream backend {
+  server 10.1.4.183:3000;
+  server 10.1.3.6:3000;
+}
+
 server {
   listen 80;
   server_name _;
@@ -95,7 +100,7 @@ server {
   }
 
   location /api/ {
-    proxy_pass http://BACKEND_IP:3000;
+    proxy_pass http://backend;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -103,9 +108,25 @@ server {
 }
 NGINXEOF
 
-# Remove default nginx config to avoid conflicts
-rm -f /etc/nginx/conf.d/default.conf
-sed -i '/^\s*server\s*{/,/^\s*}/d' /etc/nginx/nginx.conf 2>/dev/null || true
+# ─── Fix nginx.conf ───
+tee /etc/nginx/nginx.conf > /dev/null << 'CONFEOF'
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+pid /run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+    include /etc/nginx/conf.d/*.conf;
+}
+CONFEOF
 
 # ─── Start Nginx ───
 systemctl start nginx
